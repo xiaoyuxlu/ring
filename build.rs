@@ -172,7 +172,30 @@ fn c_flags(target: &Target) -> &'static [&'static str] {
 }
 
 fn cpp_flags(target: &Target) -> &'static [&'static str] {
-    if target.env != MSVC {
+    if target.env == MSVC || target.os == "uefi" {
+       static MSVC_FLAGS: &[&str] = &[
+            "/GS",   // Buffer security checks.
+            "/Gy",   // Enable function-level linking.
+            "/EHsc", // C++ exceptions only, only in C++.
+            "/GR-",  // Disable RTTI.
+            "/Zc:wchar_t",
+            "/Zc:forScope",
+            "/Zc:inline",
+            "/Zc:rvalueCast",
+            // Warnings.
+            "/sdl",
+            "/Wall",
+            "/wd4127", // C4127: conditional expression is constant
+            "/wd4464", // C4464: relative include path contains '..'
+            "/wd4514", // C4514: <name>: unreferenced inline function has be
+            "/wd4710", // C4710: function not inlined
+            "/wd4711", // C4711: function 'function' selected for inline expansion
+            "/wd4820", // C4820: <struct>: <n> bytes padding added after <name>
+            "/wd5045", /* C5045: Compiler will insert Spectre mitigation for memory load if
+                        * /Qspectre switch specified */
+        ];
+        MSVC_FLAGS
+    }  else {
         static NON_MSVC_FLAGS: &[&str] = &[
             "-pedantic",
             "-pedantic-errors",
@@ -199,29 +222,6 @@ fn cpp_flags(target: &Target) -> &'static [&'static str] {
             "-fvisibility=hidden",
         ];
         NON_MSVC_FLAGS
-    } else {
-        static MSVC_FLAGS: &[&str] = &[
-            "/GS",   // Buffer security checks.
-            "/Gy",   // Enable function-level linking.
-            "/EHsc", // C++ exceptions only, only in C++.
-            "/GR-",  // Disable RTTI.
-            "/Zc:wchar_t",
-            "/Zc:forScope",
-            "/Zc:inline",
-            "/Zc:rvalueCast",
-            // Warnings.
-            "/sdl",
-            "/Wall",
-            "/wd4127", // C4127: conditional expression is constant
-            "/wd4464", // C4464: relative include path contains '..'
-            "/wd4514", // C4514: <name>: unreferenced inline function has be
-            "/wd4710", // C4710: function not inlined
-            "/wd4711", // C4711: function 'function' selected for inline expansion
-            "/wd4820", // C4820: <struct>: <n> bytes padding added after <name>
-            "/wd5045", /* C5045: Compiler will insert Spectre mitigation for memory load if
-                        * /Qspectre switch specified */
-        ];
-        MSVC_FLAGS
     }
 }
 
@@ -233,6 +233,7 @@ const ASM_TARGETS: &[(&str, Option<&str>, &str)] = &[
     ("x86_64", Some("ios"), "macosx"),
     ("x86_64", Some("macos"), "macosx"),
     ("x86_64", Some(WINDOWS), "nasm"),
+    ("x86_64", Some("uefi"), "nasm"),
     ("x86_64", None, "elf"),
     ("aarch64", Some("ios"), "ios64"),
     ("aarch64", None, "linux64"),
@@ -271,7 +272,10 @@ fn ring_build_rs_main() {
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
+    let mut env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
+    if os == "uefi" {
+        env = MSVC.to_string();
+    }
     let (obj_ext, obj_opt) = if env == MSVC {
         (MSVC_OBJ_EXT, MSVC_OBJ_OPT)
     } else {
@@ -308,7 +312,7 @@ fn pregenerate_asm_main() {
         // For Windows, package pregenerated object files instead of
         // pregenerated assembly language source files, so that the user
         // doesn't need to install the assembler.
-        let asm_dir = if target_os == Some(WINDOWS) {
+        let asm_dir = if target_os == Some(WINDOWS) || target_os == Some("uefi") {
             &pregenerated_tmp
         } else {
             &pregenerated
@@ -318,7 +322,15 @@ fn pregenerate_asm_main() {
         perlasm(&perlasm_src_dsts, target_arch, perlasm_format, None);
 
         if target_os == Some(WINDOWS) {
-            let srcs = asm_srcs(perlasm_src_dsts);
+            let srcs = asm_srcs(perlasm_src_dsts.clone());
+            for src in srcs {
+                let src_path = PathBuf::from(src);
+                let obj_path = obj_path(&pregenerated, &src_path, MSVC_OBJ_EXT);
+                run_command(yasm(&src_path, target_arch, &obj_path));
+            }
+        }
+        if target_os == Some("uefi") {
+            let srcs = asm_srcs(perlasm_src_dsts.clone());
             for src in srcs {
                 let src_path = PathBuf::from(src);
                 let obj_path = obj_path(&pregenerated, &src_path, MSVC_OBJ_EXT);
@@ -396,7 +408,7 @@ fn build_c_code(target: &Target, pregenerated: PathBuf, out_dir: &Path) {
     // For Windows we also pregenerate the object files for non-Git builds so
     // the user doesn't need to install the assembler. On other platforms we
     // assume the C compiler also assembles.
-    if use_pregenerated && &target.os == WINDOWS {
+    if use_pregenerated && (&target.os == WINDOWS || &target.os == "uefi") {
         // The pregenerated object files always use ".obj" as the extension,
         // even when the C/C++ compiler outputs files with the ".o" extension.
         asm_srcs = asm_srcs
