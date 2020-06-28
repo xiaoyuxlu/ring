@@ -158,7 +158,7 @@ const RING_BUILD_FILE: &[&str] = &["build.rs"];
 const PREGENERATED: &str = "pregenerated";
 
 fn c_flags(target: &Target) -> &'static [&'static str] {
-    if target.env != MSVC {
+    if target.env != MSVC && target.os != "uefi" {
         static NON_MSVC_FLAGS: &[&str] = &[
             "-std=c1x", // GCC 4.6 requires "c1x" instead of "c11"
             "-Wbad-function-cast",
@@ -172,7 +172,7 @@ fn c_flags(target: &Target) -> &'static [&'static str] {
 }
 
 fn cpp_flags(target: &Target) -> &'static [&'static str] {
-    if target.env == MSVC || target.os == "uefi" {
+    if target.env == MSVC && target.os != "uefi" {
        static MSVC_FLAGS: &[&str] = &[
             "/GS",   // Buffer security checks.
             "/Gy",   // Enable function-level linking.
@@ -195,7 +195,30 @@ fn cpp_flags(target: &Target) -> &'static [&'static str] {
                         * /Qspectre switch specified */
         ];
         MSVC_FLAGS
-    }  else {
+    }  else if target.os == "uefi"  {
+        static MSVC_FLAGS_UEFI: &[&str] = &[
+            "/DNDEBUG",
+            "/GS-",   // Buffer security checks.
+            "/Gy",   // Enable function-level linking.
+            "/EHsc", // C++ exceptions only, only in C++.
+            "/GR-",  // Disable RTTI.
+            "/Zc:wchar_t",
+            "/Zc:forScope",
+            "/Zc:inline",
+            "/Zc:rvalueCast",
+            // Warnings.
+            "/Wall",
+            "/wd4127", // C4127: conditional expression is constant
+            "/wd4464", // C4464: relative include path contains '..'
+            "/wd4514", // C4514: <name>: unreferenced inline function has be
+            "/wd4710", // C4710: function not inlined
+            "/wd4711", // C4711: function 'function' selected for inline expansion
+            "/wd4820", // C4820: <struct>: <n> bytes padding added after <name>
+            "/wd5045", /* C5045: Compiler will insert Spectre mitigation for memory load if
+                        * /Qspectre switch specified */
+        ];
+        MSVC_FLAGS_UEFI
+    } else {
         static NON_MSVC_FLAGS: &[&str] = &[
             "-pedantic",
             "-pedantic-errors",
@@ -238,6 +261,7 @@ const ASM_TARGETS: &[(&str, Option<&str>, &str)] = &[
     ("aarch64", Some("ios"), "ios64"),
     ("aarch64", None, "linux64"),
     ("x86", Some(WINDOWS), "win32n"),
+    ("x86", Some("uefi"), "win32n"),
     ("x86", Some("ios"), "macosx"),
     ("x86", None, "elf"),
     ("arm", Some("ios"), "ios32"),
@@ -522,7 +546,7 @@ fn compile(
         let mut out_path = out_dir.clone().join(p.file_name().unwrap());
         assert!(out_path.set_extension(target.obj_ext));
         if need_run(&p, &out_path, includes_modified) {
-            let cmd = if &target.os != WINDOWS || ext != "asm" {
+            let cmd = if !(&target.os == WINDOWS || &target.os=="uefi") || ext != "asm" {
                 cc(p, ext, target, warnings_are_errors, &out_path)
             } else {
                 yasm(p, &target.arch, &out_path)
@@ -561,7 +585,7 @@ fn cc(
     for f in cpp_flags(target) {
         let _ = c.flag(&f);
     }
-    if &target.os != "none" && &target.os != "redox" && &target.os != "windows" {
+    if &target.os != "none" && &target.os != "redox" && &target.os != "windows" && &target.os != "uefi" {
         let _ = c.flag("-fstack-protector");
     }
 
@@ -571,6 +595,7 @@ fn cc(
             let _ = c.flag("-gfull");
         }
         (_, "msvc") => (),
+        (_, "uefi") => (),
         _ => {
             let _ = c.flag("-g3");
         }
@@ -579,11 +604,13 @@ fn cc(
         let _ = c.define("NDEBUG", None);
     }
 
-    if &target.env == "msvc" {
+    if &target.env == "msvc"{
         if std::env::var("OPT_LEVEL").unwrap() == "0" {
             let _ = c.flag("/Od"); // Disable optimization for debug builds.
                                    // run-time checking: (s)tack frame, (u)ninitialized variables
-            let _ = c.flag("/RTCsu");
+            if &target.os != "uefi" {
+                let _ = c.flag("/RTCsu");
+            }
         } else {
             let _ = c.flag("/Ox"); // Enable full optimization.
         }
@@ -713,7 +740,7 @@ fn asm_path(out_dir: &Path, src: &Path, os: Option<&str>, perlasm_format: &str) 
     let src_stem = src.file_stem().expect("source file without basename");
 
     let dst_stem = src_stem.to_str().unwrap();
-    let dst_extension = if os == Some("windows") { "asm" } else { "S" };
+    let dst_extension = if os == Some("windows") || os == Some("uefi") { "asm" } else { "S" };
     let dst_filename = format!("{}-{}.{}", dst_stem, perlasm_format, dst_extension);
     out_dir.join(dst_filename)
 }
