@@ -193,6 +193,9 @@ use self::darwin::fill as fill_impl;
 #[cfg(any(target_os = "fuchsia"))]
 use self::fuchsia::fill as fill_impl;
 
+#[cfg(any(target_os = "uefi"))]
+use self::uefi::fill as fill_impl;
+
 #[cfg(any(target_os = "android", target_os = "linux"))]
 mod sysrand_chunk {
     use crate::{c, error};
@@ -425,5 +428,19 @@ mod fuchsia {
     #[link(name = "zircon")]
     extern "C" {
         fn zx_cprng_draw(buffer: *mut u8, length: usize);
+    }
+}
+
+#[cfg(any(target_os = "uefi"))]
+mod uefi {
+    use crate::error;
+
+    pub fn fill(_dest: &mut [u8]) -> Result<(), error::Unspecified> {
+        // use efi_random;
+        // efi_random::generate(&_dest);
+        for i in 0.._dest.len() {
+            _dest[i] = 10u8;
+        }
+        Ok(())
     }
 }

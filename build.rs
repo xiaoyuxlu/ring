@@ -158,7 +158,7 @@ const RING_BUILD_FILE: &[&str] = &["build.rs"];
 const PREGENERATED: &str = "pregenerated";
 
 fn c_flags(target: &Target) -> &'static [&'static str] {
-    if target.env != MSVC {
+    if target.env != MSVC && target.os != "uefi" {
         static NON_MSVC_FLAGS: &[&str] = &[
             "-std=c1x", // GCC 4.6 requires "c1x" instead of "c11"
             "-Wbad-function-cast",
@@ -166,6 +166,11 @@ fn c_flags(target: &Target) -> &'static [&'static str] {
             "-Wstrict-prototypes",
         ];
         NON_MSVC_FLAGS
+    } else if target.os == "uefi" {
+        static UEFI_C_FLAGS: &[&str] = &[
+            "-D__wasm__",
+        ];
+        UEFI_C_FLAGS
     } else {
         &[]
     }
@@ -233,10 +238,12 @@ const ASM_TARGETS: &[(&str, Option<&str>, Option<&str>)] = &[
     ("x86_64", Some("ios"), Some("macosx")),
     ("x86_64", Some("macos"), Some("macosx")),
     ("x86_64", Some(WINDOWS), Some("nasm")),
+    ("x86_64", Some("uefi"), Some("nasm")),
     ("x86_64", None, Some("elf")),
     ("aarch64", Some("ios"), Some("ios64")),
     ("aarch64", None, Some("linux64")),
     ("x86", Some(WINDOWS), Some("win32n")),
+    ("x86", Some("uefi"), Some("win32n")),
     ("x86", Some("ios"), Some("macosx")),
     ("x86", None, Some("elf")),
     ("arm", Some("ios"), Some("ios32")),
@@ -390,7 +397,7 @@ fn build_c_code(target: &Target, pregenerated: PathBuf, out_dir: &Path) {
         let perlasm_src_dsts =
             perlasm_src_dsts(asm_dir, &target.arch, Some(&target.os), perlasm_format);
 
-        if !use_pregenerated {
+        if !use_pregenerated && (&target.os == WINDOWS || &target.os == "uefi") {
             perlasm(
                 &perlasm_src_dsts[..],
                 &target.arch,
@@ -523,7 +530,7 @@ fn compile(
         let mut out_path = out_dir.clone().join(p.file_name().unwrap());
         assert!(out_path.set_extension(target.obj_ext));
         if need_run(&p, &out_path, includes_modified) {
-            let cmd = if &target.os != WINDOWS || ext != "asm" {
+            let cmd = if !(&target.os == WINDOWS || &target.os == "uefi") || ext != "asm" {
                 cc(p, ext, target, warnings_are_errors, &out_path)
             } else {
                 yasm(p, &target.arch, &out_path)
@@ -566,6 +573,7 @@ fn cc(
         && &target.os != "redox"
         && &target.os != "windows"
         && target.arch != "wasm32"
+        && target.os != "uefi"
     {
         let _ = c.flag("-fstack-protector");
     }
@@ -634,6 +642,10 @@ fn yasm(file: &Path, arch: &str, out_file: &Path) -> Command {
         _ => panic!("unsupported arch: {}", arch),
     };
     let mut c = Command::new("yasm.exe");
+    if !std::env::var("HOST").unwrap().contains("msvc") {
+        c = Command::new("yasm");
+    }
+
     let _ = c
         .arg("-X")
         .arg("vc")
@@ -722,7 +734,7 @@ fn asm_path(out_dir: &Path, src: &Path, os: Option<&str>, perlasm_format: &str) 
     let src_stem = src.file_stem().expect("source file without basename");
 
     let dst_stem = src_stem.to_str().unwrap();
-    let dst_extension = if os == Some("windows") { "asm" } else { "S" };
+    let dst_extension = if os == Some("windows") || os == Some("uefi") { "asm" } else { "S" };
     let dst_filename = format!("{}-{}.{}", dst_stem, perlasm_format, dst_extension);
     out_dir.join(dst_filename)
 }
