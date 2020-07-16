@@ -434,13 +434,11 @@ mod fuchsia {
 #[cfg(any(target_os = "uefi"))]
 mod uefi {
     use crate::error;
-
-    pub fn fill(_dest: &mut [u8]) -> Result<(), error::Unspecified> {
-        // use efi_random;
-        // efi_random::generate(&_dest);
-        for i in 0.._dest.len() {
-            _dest[i] = 10u8;
+    use efi_random;
+    pub fn fill(dest: &mut [u8]) -> Result<(), error::Unspecified> {
+        match efi_random::generate(dest) {
+            Err(_) => Err(error::Unspecified),
+            Ok(_) => Ok(())
         }
-        Ok(())
     }
 }

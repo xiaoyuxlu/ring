@@ -317,6 +317,9 @@ wasm-bindgen-test = { version = "0.3.10", default-features = false }
 [target.'cfg(any(unix, windows))'.dev-dependencies]
 libc = { version = "0.2.69", default-features = false }
 
+[target.'cfg(target_os = "uefi")'.dependencies]
+efi-random = {path = "../edk2/RustPkg/External/efi-random"}
+
 # Keep this in sync with `[dependencies]` in pregenerate_asm/Cargo.toml.
 [build-dependencies]
 cc = { path = "../cc-rs", default-features = false }
