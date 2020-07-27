@@ -434,11 +434,22 @@ mod fuchsia {
 #[cfg(any(target_os = "uefi"))]
 mod uefi {
     use crate::error;
-    use efi_random;
+    use efi_random::{self, Unsupported};
     pub fn fill(dest: &mut [u8]) -> Result<(), error::Unspecified> {
-        match efi_random::generate(dest) {
+        match generate(dest) {
             Err(_) => Err(error::Unspecified),
             Ok(_) => Ok(())
         }
+    }
+
+    // different between rdseed and rdrand and which should be used
+    // https://software.intel.com/content/www/us/en/develop/blogs/the-difference-between-rdrand-and-rdseed.html
+    fn generate(dest: &mut [u8]) -> Result<(), Unsupported> {
+        for i in 0..dest.len() {
+            unsafe{
+                dest[i] = efi_random::rdrand16()? as u8;
+            }
+        }
+        Ok(())
     }
 }
