@@ -444,6 +444,15 @@ impl<M> Elem<M, Unencoded> {
         limb::big_endian_from_limbs(&self.limbs, out)
     }
 
+    pub fn to_bytes_be(&self) -> Vec<u8> {
+        let num_limbs = self.limbs.len();
+        let out_len = num_limbs * LIMB_BYTES;
+        let mut ret = Vec::<u8>::new();
+        ret.resize(out_len, 0);
+        limb::big_endian_from_limbs(&self.limbs, ret.as_mut_slice());
+        ret
+    }
+
     pub fn into_modulus<MM>(self) -> Result<Modulus<MM>, error::KeyRejected> {
         let (m, _bits) =
             Modulus::from_boxed_limbs(BoxedLimbs::minimal_width_from_unpadded(&self.limbs))?;
